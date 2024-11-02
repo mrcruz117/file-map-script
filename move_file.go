@@ -45,11 +45,11 @@ func moveFile(sourcePath, destinationPath string) error {
 		return err
 	}
 
-	// Remove the source file
-	err = os.Remove(sourcePath)
-	if err != nil {
-		return err
-	}
+	// Remove the source file (optional)
+	// err = os.Remove(sourcePath)
+	// if err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
