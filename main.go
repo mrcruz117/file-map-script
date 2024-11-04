@@ -4,21 +4,31 @@ import (
 	"bufio"
 	"encoding/csv"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 var ErrFileFound = errors.New("file found")
 
 func main() {
-	csvPath := `C:\Users\mamores\Desktop\PowerShell_POC\mapping.csv`
-	rootDirectory := `C:\Users\mamores\Desktop\PowerShell_POC\MainFolder`
+	start := time.Now()
+	csvPath := flag.String("csvPath", "", "Path to the CSV file")
+	rootDirectory := flag.String("rootDirectory", "", "Root directory of folders to search through")
+	maxGoroutines := flag.Int("maxGoroutines", 32, "Maximum number of concurrent goroutines")
+	flag.Parse()
 
-	csvFile, err := os.Open(csvPath)
+	csvPathValue := *csvPath
+	rootDirectoryValue := *rootDirectory
+	maxGoroutinesValue := *maxGoroutines
+
+	csvFile, err := os.Open(csvPathValue)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,6 +53,12 @@ func main() {
 		}
 	}
 
+	// Use a WaitGroup to wait for all goroutines to complete
+	var wg sync.WaitGroup
+
+	// Create a buffered channel to limit the number of concurrent goroutines
+	semaphore := make(chan struct{}, maxGoroutinesValue)
+
 	// Process each row in the CSV file
 	for {
 		record, err := reader.Read()
@@ -56,32 +72,50 @@ func main() {
 		fileName := record[fileNameIndex]
 		destinationDirectory := record[directoryIndex]
 
-		// Search for the file in the root directory and its subdirectories
-		var filePath string
-		err = filepath.Walk(rootDirectory, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() && strings.EqualFold(info.Name(), fileName) {
-				filePath = path
-				return ErrFileFound // Signal to stop walking
-			}
-			return nil
-		})
-		if err != nil && err != ErrFileFound {
-			log.Fatal(err)
-		}
+		semaphore <- struct{}{}
 
-		// If the file is found, move it to the destination directory
-		if filePath != "" {
-			destinationPath := filepath.Join(destinationDirectory, fileName)
-			err = moveFile(filePath, destinationPath)
-			if err != nil {
-				log.Fatal(err)
+		// Increment the WaitGroup counter
+		wg.Add(1)
+
+		// Launch a goroutine for each record
+		go func(fileName, destinationDirectory string) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			// Search for the file in the root directory and its subdirectories
+			var filePath string
+			err := filepath.WalkDir(rootDirectoryValue, func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !d.IsDir() && strings.EqualFold(d.Name(), fileName) {
+					filePath = path
+					return ErrFileFound
+				}
+				return nil
+			})
+
+			if err != nil && err != ErrFileFound {
+				log.Printf("Error searching for '%s': %v\n", fileName, err)
 			}
-			fmt.Printf("Moved '%s' to '%s'\n", fileName, destinationDirectory)
-		} else {
-			fmt.Printf("File '%s' not found in '%s'\n", fileName, rootDirectory)
-		}
+
+			// If the file is found, move it to the destination directory
+			if filePath != "" {
+				destinationPath := filepath.Join(destinationDirectory, fileName)
+				err = moveFile(filePath, destinationPath)
+				if err != nil {
+					log.Printf("Failed to move '%s': %v\n", fileName, err)
+					return
+				}
+				fmt.Printf("Moved '%s' to '%s'\n", fileName, destinationDirectory)
+			} else {
+				fmt.Printf("File '%s' not found in '%s'\n", fileName, rootDirectoryValue)
+			}
+		}(fileName, destinationDirectory)
 	}
+
+	wg.Wait()
+
+	elapsed := time.Since(start)
+	fmt.Printf("Process completed in %s\n", elapsed)
 }
