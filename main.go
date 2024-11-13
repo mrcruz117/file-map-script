@@ -101,12 +101,6 @@ func main() {
 			// Look up the file in the map
 			filePath, found := fileMap[strings.ToLower(fileName)]
 			if found {
-				// Ensure the destination directory exists
-				// err = os.MkdirAll(destinationDirectory, os.ModePerm)
-				// if err != nil {
-				// 	log.Printf("Failed to create directory '%s': %v\n", destinationDirectory, err)
-				// 	return
-				// }
 
 				destinationPath := filepath.Join(destinationDirectory, fileName)
 				err = moveFile(filePath, destinationPath)
