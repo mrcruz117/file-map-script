@@ -19,6 +19,7 @@ var ErrFileFound = errors.New("file found")
 
 func main() {
 	start := time.Now()
+
 	csvPath := flag.String("csvPath", "", "Path to the CSV file")
 	rootDirectory := flag.String("rootDirectory", "", "Root directory of folders to search through")
 	maxGoroutines := flag.Int("maxGoroutines", 32, "Maximum number of concurrent goroutines")
@@ -53,6 +54,21 @@ func main() {
 		}
 	}
 
+	// Map the file structure
+	fileMap := make(map[string]string)
+	err = filepath.WalkDir(rootDirectoryValue, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			fileMap[strings.ToLower(d.Name())] = path
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Use a WaitGroup to wait for all goroutines to complete
 	var wg sync.WaitGroup
 
@@ -82,25 +98,16 @@ func main() {
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			// Search for the file in the root directory and its subdirectories
-			var filePath string
-			err := filepath.WalkDir(rootDirectoryValue, func(path string, d os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if !d.IsDir() && strings.EqualFold(d.Name(), fileName) {
-					filePath = path
-					return ErrFileFound
-				}
-				return nil
-			})
+			// Look up the file in the map
+			filePath, found := fileMap[strings.ToLower(fileName)]
+			if found {
+				// Ensure the destination directory exists
+				// err = os.MkdirAll(destinationDirectory, os.ModePerm)
+				// if err != nil {
+				// 	log.Printf("Failed to create directory '%s': %v\n", destinationDirectory, err)
+				// 	return
+				// }
 
-			if err != nil && err != ErrFileFound {
-				log.Printf("Error searching for '%s': %v\n", fileName, err)
-			}
-
-			// If the file is found, move it to the destination directory
-			if filePath != "" {
 				destinationPath := filepath.Join(destinationDirectory, fileName)
 				err = moveFile(filePath, destinationPath)
 				if err != nil {
